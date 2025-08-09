@@ -1,0 +1,40 @@
+{
+  "name": "next-algolia",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --turbopack",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@algolia/autocomplete-js": "^1.17.8",
+    "@algolia/autocomplete-plugin-query-suggestions": "^1.17.8",
+    "@algolia/autocomplete-plugin-recent-searches": "^1.17.8",
+    "@algolia/autocomplete-shared": "^1.17.8",
+    "@algolia/autocomplete-theme-classic": "^1.17.8",
+    "@radix-ui/react-slot": "^1.1.1",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "dotenv": "^16.4.7",
+    "lucide-react": "^0.469.0",
+    "next": "^15.4.6",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-instantsearch": "^7.16.2",
+    "tailwind-merge": "^2.6.0",
+    "tailwindcss-animate": "^1.0.7"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "15.1.3",
+    "postcss": "^8",
+    "tailwindcss": "^3.4.1",
+    "typescript": "^5"
+  }
+}
