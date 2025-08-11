@@ -41,6 +41,11 @@ type SetInstantSearchUiStateOptions = {
   query: string;
   categories?: string;
 };
+// components/algolia/AutoComplete.tsx
+
+// ... (imports remain the same)
+
+// ... (AutocompleteProps and SetInstantSearchUiStateOptions types remain the same)
 
 export default function Autocomplete({
   searchClient,
@@ -55,7 +60,6 @@ export default function Autocomplete({
   const { items: categories, refine: setCategory } = useHierarchicalMenu({
     attributes: INSTANT_SEARCH_HIERARCHICAL_ATTRIBUTES,
   });
-  console.log(categories);
 
   const { refine: setPage } = usePagination();
 
@@ -69,18 +73,16 @@ export default function Autocomplete({
 
   useEffect(() => {
     setQuery(instantSearchUiState.query);
-    // eslint-disable-next-line @typescript-eslint/no-unused-expressions
-    instantSearchUiState.categories && setCategory(instantSearchUiState.categories);
+    if (instantSearchUiState.categories) {
+      setCategory(instantSearchUiState.categories);
+    }
     setPage(0);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [instantSearchUiState]);
 
   const currentCategory = useMemo(
     () => categories.find(({ isRefined }) => isRefined)?.value,
     [categories]
   );
-
-
 
   const plugins = useMemo(() => {
     const recentSearches = createLocalStorageRecentSearchesPlugin({
@@ -99,17 +101,19 @@ export default function Autocomplete({
       },
     });
 
-    // todo this for the suggestions
-
     const querySuggestionsInCategory = createQuerySuggestionsPlugin({
       searchClient,
       indexName: INSTANT_SUGGESTIONS_INDEX,
       getSearchParams() {
+        // تصحيح: تم تبسيط `facetFilters` ليعمل بشكل صحيح
+        // يفترض أن فهرس الاقتراحات يحتوي على facet باسم `locationHierarchy`
+        if (!currentCategory) {
+          return recentSearches.data!.getAlgoliaSearchParams({ hitsPerPage: 0 });
+        }
         return recentSearches.data!.getAlgoliaSearchParams({
           hitsPerPage: 3,
           facetFilters: [
-            `${INSTANT_SEARCH_INDEX_NAME}.facets.exact_matches.${currentCategory}`,
-            `${INSTANT_SEARCH_INDEX_NAME}.facets.exact_matches.${INSTANT_SEARCH_HIERARCHICAL_ATTRIBUTES[0]}.value:${currentCategory}`,
+            `locationHierarchy:${currentCategory}`
           ],
         });
       },
@@ -120,14 +124,13 @@ export default function Autocomplete({
           onSelect({ item }) {
             setInstantSearchUiState({
               query: item.query,
-              categories : item.__autocomplete_qsCategory,
+              categories: item.__autocomplete_qsCategory,
             });
           },
           getItems(params) {
             if (!currentCategory) {
               return [];
             }
-
             return source.getItems(params);
           },
           templates: {
@@ -136,14 +139,12 @@ export default function Autocomplete({
               if (items.length === 0) {
                 return <Fragment />;
               }
-
               return (
-                <>
+                <div className="p-2">
                   <span className="text-md text-secondary font-medium">
                     In {currentCategory}
                   </span>
-                  <span className="text-md text-secondary font-medium" />
-                </>
+                </div>
               );
             },
           },
@@ -151,32 +152,23 @@ export default function Autocomplete({
       },
     });
 
-    // todo this for the search query suggestions
-
     const querySuggestions = createQuerySuggestionsPlugin({
       searchClient,
       indexName: INSTANT_SUGGESTIONS_INDEX,
-      getSearchParams() {
-        if (!currentCategory) {
-          return recentSearches.data!.getAlgoliaSearchParams({
-            hitsPerPage: 6,
-          });
-        }
-
-        return recentSearches.data!.getAlgoliaSearchParams({
-          hitsPerPage: 3,
-          facetFilters: [
-            `${INSTANT_SEARCH_INDEX_NAME}.facets.exact_matches.query.value:-${currentCategory}`,
-          ],
-        });
-      },
+      // تصحيح: تم تعديل `categoryAttribute` ليتوافق مع بنية البيانات
       categoryAttribute: [
         INSTANT_SEARCH_INDEX_NAME,
-        'genres',
-        'keywords',
-        'title',
-        'overview'
+        'facets',
+        'exact_matches',
+        'locationHierarchy',
       ],
+      getSearchParams() {
+        const searchParams = {
+          hitsPerPage: currentCategory ? 3 : 6,
+          facetFilters: [`${INSTANT_SEARCH_INDEX_NAME}.facets.exact_matches.locationHierarchy.value:-${currentCategory}`],
+        };
+        return recentSearches.data!.getAlgoliaSearchParams(searchParams);
+      },
       transformSource({ source }) {
         return {
           ...source,
@@ -191,7 +183,6 @@ export default function Autocomplete({
             if (!params.state.query) {
               return [];
             }
-
             return source.getItems(params);
           },
           templates: {
@@ -200,14 +191,12 @@ export default function Autocomplete({
               if (!currentCategory || items.length === 0) {
                 return <Fragment />;
               }
-
               return (
-                <>
+                <div className="p-2">
                   <span className="font-bold text-primary">
                     In other categories
                   </span>
-                  <span className="font-medium text-primary" />
-                </>
+                </div>
               );
             },
           },
@@ -216,7 +205,7 @@ export default function Autocomplete({
     });
 
     return [recentSearches, querySuggestions, querySuggestionsInCategory];
-  }, [currentCategory]);
+  }, [currentCategory, searchClient]);
 
   useEffect(() => {
     if (!autocompleteContainer.current) {
@@ -246,7 +235,6 @@ export default function Autocomplete({
       render({ children }, root) {
         if (!panelRootRef.current || rootRef.current !== root) {
           rootRef.current = root;
-
           panelRootRef.current?.unmount();
           panelRootRef.current = createRoot(root);
         }
@@ -255,7 +243,8 @@ export default function Autocomplete({
     });
 
     return () => autocompleteInstance.destroy();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plugins]);
 
-  return <div className={className} ref={autocompleteContainer}/>;
+  return <div className={className} ref={autocompleteContainer} />;
 }
