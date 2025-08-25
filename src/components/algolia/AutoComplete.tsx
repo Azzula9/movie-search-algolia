@@ -1,4 +1,4 @@
-// autocomplete component
+// autocomplete component with instant suggestions
 import type { LiteClient as SearchClient } from 'algoliasearch/lite';
 import type { BaseItem } from '@algolia/autocomplete-core';
 import type { AutocompleteOptions } from '@algolia/autocomplete-js';
@@ -24,8 +24,7 @@ import { createQuerySuggestionsPlugin } from '@algolia/autocomplete-plugin-query
 import { debounce } from '@algolia/autocomplete-shared';
 
 import {
-    INSTANT_SEARCH_HIERARCHICAL_ATTRIBUTES,
-//   INSTANT_SEARCH_HIERARCHICAL_ATTRIBUTES,
+  INSTANT_SEARCH_HIERARCHICAL_ATTRIBUTES,
   INSTANT_SEARCH_INDEX_NAME,
   INSTANT_SUGGESTIONS_INDEX,
 } from '@/lib/constants';
@@ -41,11 +40,6 @@ type SetInstantSearchUiStateOptions = {
   query: string;
   categories?: string;
 };
-// components/algolia/AutoComplete.tsx
-
-// ... (imports remain the same)
-
-// ... (AutocompleteProps and SetInstantSearchUiStateOptions types remain the same)
 
 export default function Autocomplete({
   searchClient,
@@ -66,6 +60,7 @@ export default function Autocomplete({
   const [instantSearchUiState, setInstantSearchUiState] =
     useState<SetInstantSearchUiStateOptions>({ query });
 
+  // Remove debounce for instant suggestions - we only update on submit
   const debouncedSetInstantSearchUiState = debounce(
     setInstantSearchUiState,
     500
@@ -84,6 +79,92 @@ export default function Autocomplete({
     [categories]
   );
 
+  // Create a source for location suggestions
+  const locationSuggestionsSource = useMemo(() => {
+    return {
+      sourceId: 'locationSuggestions',
+      getItems({ query }: { query: string }) {
+        if (!query) return [];
+        
+        return searchClient.search([{
+          indexName: INSTANT_SEARCH_INDEX_NAME,
+          query,
+          params: {
+            hitsPerPage: 8,
+            attributesToRetrieve: ['locationPathEn', 'locationHierarchy'],
+            facets: ['locationHierarchy.lvl0', 'locationHierarchy.lvl1', 'locationHierarchy.lvl2'],
+            distinct: true,
+          }
+        }]).then(({ results }) => {
+          const hits = results[0].hits;
+          const locationSuggestions = new Set();
+          
+          // Extract unique location suggestions
+          hits.forEach((hit: any) => {
+            if (hit.locationPathEn) {
+              locationSuggestions.add(hit.locationPathEn);
+            }
+            if (hit.locationHierarchy) {
+              Object.values(hit.locationHierarchy).forEach((location: any) => {
+                if (location && typeof location === 'string') {
+                  locationSuggestions.add(location);
+                }
+              });
+            }
+          });
+
+          return Array.from(locationSuggestions)
+            .filter((location: any) => 
+              location.toLowerCase().includes(query.toLowerCase())
+            )
+            .slice(0, 8)
+            .map((location: any) => ({
+              label: location,
+              query: location,
+            }));
+        });
+      },
+      templates: {
+        item({ item }: { item: any }) {
+          const query = autocompleteContainer.current?.querySelector('input')?.value || '';
+          const highlightedLabel = item.label.replace(
+            new RegExp(`(${query})`, 'gi'),
+            '<mark>$1</mark>'
+          );
+          
+          return (
+            <div className="flex items-center p-2 hover:bg-gray-50 cursor-pointer">
+              <svg className="w-4 h-4 mr-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+              <span dangerouslySetInnerHTML={{ __html: highlightedLabel }} />
+            </div>
+          );
+        },
+        noResults() {
+          return (
+            <div className="p-4 text-center text-gray-500">
+              No locations found
+            </div>
+          );
+        },
+      },
+      onSelect({ item }: { item: any }) {
+        // Set the query but don't trigger search immediately
+        const input = autocompleteContainer.current?.querySelector('input');
+        if (input) {
+          input.value = item.label;
+        }
+        // Close the autocomplete panel
+        const panel = document.querySelector('.aa-Panel');
+        if (panel) {
+          (panel as HTMLElement).style.display = 'none';
+        }
+      },
+    };
+  }, [searchClient]);
+
   const plugins = useMemo(() => {
     const recentSearches = createLocalStorageRecentSearchesPlugin({
       key: 'instantsearch',
@@ -101,111 +182,8 @@ export default function Autocomplete({
       },
     });
 
-    const querySuggestionsInCategory = createQuerySuggestionsPlugin({
-      searchClient,
-      indexName: INSTANT_SUGGESTIONS_INDEX,
-      getSearchParams() {
-        // تصحيح: تم تبسيط `facetFilters` ليعمل بشكل صحيح
-        // يفترض أن فهرس الاقتراحات يحتوي على facet باسم `locationHierarchy`
-        if (!currentCategory) {
-          return recentSearches.data!.getAlgoliaSearchParams({ hitsPerPage: 0 });
-        }
-        return recentSearches.data!.getAlgoliaSearchParams({
-          hitsPerPage: 3,
-          facetFilters: [
-            `locationHierarchy:${currentCategory}`
-          ],
-        });
-      },
-      transformSource({ source }) {
-        return {
-          ...source,
-          sourceId: 'querySuggestionsInCategoryPlugin',
-          onSelect({ item }) {
-            setInstantSearchUiState({
-              query: item.query,
-              categories: item.__autocomplete_qsCategory,
-            });
-          },
-          getItems(params) {
-            if (!currentCategory) {
-              return [];
-            }
-            return source.getItems(params);
-          },
-          templates: {
-            ...source.templates,
-            header({ items }) {
-              if (items.length === 0) {
-                return <Fragment />;
-              }
-              return (
-                <div className="p-2">
-                  <span className="text-md text-secondary font-medium">
-                    In {currentCategory}
-                  </span>
-                </div>
-              );
-            },
-          },
-        };
-      },
-    });
-
-    const querySuggestions = createQuerySuggestionsPlugin({
-      searchClient,
-      indexName: INSTANT_SUGGESTIONS_INDEX,
-      // تصحيح: تم تعديل `categoryAttribute` ليتوافق مع بنية البيانات
-      categoryAttribute: [
-        INSTANT_SEARCH_INDEX_NAME,
-        'facets',
-        'exact_matches',
-        'locationHierarchy',
-      ],
-      getSearchParams() {
-        const searchParams = {
-          hitsPerPage: currentCategory ? 3 : 6,
-          facetFilters: [`${INSTANT_SEARCH_INDEX_NAME}.facets.exact_matches.locationHierarchy.value:-${currentCategory}`],
-        };
-        return recentSearches.data!.getAlgoliaSearchParams(searchParams);
-      },
-      transformSource({ source }) {
-        return {
-          ...source,
-          sourceId: 'querySuggestionsPlugin',
-          onSelect({ item }) {
-            setInstantSearchUiState({
-              query: item.query,
-              categories: item.__autocomplete_qsCategory || '',
-            });
-          },
-          getItems(params) {
-            if (!params.state.query) {
-              return [];
-            }
-            return source.getItems(params);
-          },
-          templates: {
-            ...source.templates,
-            header({ items }) {
-              if (!currentCategory || items.length === 0) {
-                return <Fragment />;
-              }
-              return (
-                <div className="p-2">
-                  <span className="font-bold text-primary">
-                    In other categories
-                  </span>
-                </div>
-              );
-            },
-          },
-        };
-      },
-    });
-
-    return [recentSearches, querySuggestions, querySuggestionsInCategory];
-  }, [currentCategory, searchClient]);
+    return [recentSearches];
+  }, []);
 
   useEffect(() => {
     if (!autocompleteContainer.current) {
@@ -218,18 +196,19 @@ export default function Autocomplete({
       initialState: { query },
       insights: true,
       plugins,
+      getSources() {
+        return [locationSuggestionsSource];
+      },
       onReset() {
         setInstantSearchUiState({ query: '', categories: currentCategory });
       },
       onSubmit({ state }) {
+        // Only trigger full search on submit (Enter key)
         setInstantSearchUiState({ query: state.query });
       },
       onStateChange({ prevState, state }) {
-        if (prevState.query !== state.query) {
-          debouncedSetInstantSearchUiState({
-            query: state.query,
-          });
-        }
+        // Don't trigger search on every keystroke - only show suggestions
+        // The actual search will only happen on submit
       },
       renderer: { createElement, Fragment, render: () => {} },
       render({ children }, root) {
@@ -243,8 +222,8 @@ export default function Autocomplete({
     });
 
     return () => autocompleteInstance.destroy();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [plugins]);
+  }, [plugins, locationSuggestionsSource]);
 
   return <div className={className} ref={autocompleteContainer} />;
 }
+
